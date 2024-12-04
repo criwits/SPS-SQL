@@ -1,0 +1,9 @@
+/* List all tables required to answer given questions in the database. You should directly output the table names, one per line, with no additional formatting. Don't ignore any table if you are unsure about its relevance */
+
+/* SQLite tables, with their definitions */
+
+{% for ddl in ddls %}{{ ddl }}
+{% endfor %}
+
+/* Question */
+{{ question }}

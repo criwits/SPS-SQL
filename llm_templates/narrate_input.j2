@@ -1,0 +1,7 @@
+### Output the corresponding natural language question of this SQL based on given schema. Your answer should contain only the question.
+
+### SQLite tables are defined as follows:
+
+{% for ddl in ddls %}{{ ddl }}
+{% endfor %}
+### SQL: {{ sql }}

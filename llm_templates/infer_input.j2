@@ -1,0 +1,16 @@
+### Answer the question by sqlite SQL query only and with no explanation. You must minimize SQL execution time while ensuring correctness.
+#
+### SQLite tables, with their properties:
+#
+{% for table in tables %}# {{ table }}
+{% endfor %}#
+{% if have_fk %}### Foreign keys information:
+#
+{% for fk in fks %}# {{ fk }}
+{% endfor %}#
+{% endif %}{% if have_examples %}### Some example pairs of questions and corresponding SQL queries are provided based on similar questions:
+#
+{% for sample in examples %}# Question: {{ sample[0] }}
+# {{ sample[1] }}
+#
+{% endfor %}{% endif %}### Question: {{ question }}
