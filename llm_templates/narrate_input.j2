@@ -1,7 +1,23 @@
-### Output the corresponding natural language question of this SQL based on given schema. Your answer should contain only the question.
+Write a natural language question that can be answered using the following SQL query.
 
-### SQLite tables are defined as follows:
+<example>
+Schema:
+CREATE TABLE singer (
+    Singer_ID integer PRIMARY KEY,
+    Name text,
+    Country text,
+    ...
+);
 
+SQL Query:
+SELECT COUNT(*) FROM singer
+
+Reference output:
+How many singers do we have?
+</example>
+
+Schema:
 {% for ddl in ddls %}{{ ddl }}
 {% endfor %}
-### SQL: {{ sql }}
+SQL Query:
+{{ sql }}
