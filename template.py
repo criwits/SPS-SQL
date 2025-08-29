@@ -1,7 +1,7 @@
 import re
 from typing import Callable
 from tqdm import tqdm
-from schema import Database, build_db_from_spider
+from schema import Database, build_db_from_spider_bird
 from parser.parse import BaseConstraintExpr, ParsedSQL, parse_sql
 import argparse
 import random
@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
     dbs = dict()
     for item in tqdm(db_data):
-        db = build_db_from_spider(item)
+        db = build_db_from_spider_bird(item)
         dbs[db.name] = db
 
     templates = dict()
@@ -335,7 +335,8 @@ if __name__ == "__main__":
         for item in sql_data:
             try:
                 db = dbs[item["db_id"]]
-                sql = parse_sql(item["query"])
+                sql = parse_sql(item["SQL"])
+                # sql = parse_sql(item["query"])
                 template = SQLTemplate(db, sql)
 
                 templates.setdefault(hash(template), [template, 0])
@@ -355,3 +356,4 @@ if __name__ == "__main__":
         pickle.dump(sorted_templates, f)
 
     
+

@@ -12,10 +12,9 @@ import datasets
 
 from llm.glm4 import GLM4
 from llm.llama import Llama
-from llm.llm import LLM
+from llm.llm import LLM, DumbLLM
 from llm.qwen import Qwen
-from schema import Database, build_db_from_spider
-from schema_linking import schema_linking
+from schema import Database, build_db_from_spider_bird
 
 def generate_prompt(
     db: Database,
@@ -24,8 +23,7 @@ def generate_prompt(
     reference_shot: int,
     reference_datasets_dict: dict,
     sl: bool,
-    sl_model: LLM,
-    sl_template: Template,
+    link_result: list[dict],
     input_template: Template,
 ):
     # 找相似问题
@@ -36,11 +34,14 @@ def generate_prompt(
     else:
         examples = []
 
+    # 找到所有的表
+    ddls = []
+
     # Schema linking
-    if sl:
-        linked_tables = schema_linking(question, db, sl_model, sl_template)
-    else:
-        linked_tables = db.tables.values()
+    # if sl:
+        # linked_tables = schema_linking(question, db, sl_model, sl_template)
+    # else:
+    linked_tables = db.tables.values()
 
     tables = [str(table) for table in linked_tables]
     ddls = [table.to_ddl() for table in linked_tables]
@@ -54,6 +55,10 @@ def generate_prompt(
     return prompt
 
 def extract_sql(raw_answer: str) -> str:
+    raw_answer = raw_answer.strip()
+    # 将所有 \s 全部替换成空格
+    raw_answer = re.sub(r'\s+', ' ', raw_answer)
+
     # 第一种情况，生成的 SQL 被 ```sql``` 包裹
     sql_pattern = r'```sql(.*?)```'
     all_sqls = []
@@ -64,16 +69,26 @@ def extract_sql(raw_answer: str) -> str:
         # 如果有多个 SQL，返回最后一个，因为一般 LLM 会不断修改它之前回答的错误
         return all_sqls[-1]
     
-    # 第二种情况，只能先找到最后一个 `SELECT `，然后向后匹配到第一个 `;` 或匹配到结尾
-    sql_pattern = r'SELECT .*?;?'
-    all_sqls = []
-    for match in re.finditer(sql_pattern, raw_answer, re.DOTALL):
-        all_sqls.append(match.group(0).strip())
-
-    if all_sqls:
-        return all_sqls[-1]
+    # 第二种情况，只能先找到第一个 `SELECT `，然后向后匹配到第一个 `;` 或匹配到结尾
+    # Find all SELECT occurrences
+    selects = [m.start() for m in re.finditer('SELECT', raw_answer, re.IGNORECASE)]
     
-    return "ERROR"
+    # If no SELECT is found, return an empty string
+    if not selects:
+        return "ERROR"
+    
+    # Get the first SELECT position
+    last_select_pos = selects[0]
+    
+    # Extract the substring from the last SELECT to the end of the string
+    substring = raw_answer[last_select_pos:]
+    
+    # Find the first semicolon or the end of the string
+    semicolon_pos = substring.find(';')
+    if semicolon_pos != -1:
+        return substring[:semicolon_pos+1]
+    else:
+        return substring
 
 def flatten_sql(sql: str) -> str:
     # 去除所有的多余空格和换行
@@ -82,7 +97,6 @@ def flatten_sql(sql: str) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset-type", dest="dataset_type", type=str, required=True)
     parser.add_argument("--model-type", dest="model_type", type=str, required=True)
     parser.add_argument("--test-set", dest="test_set", type=str, required=True)
     parser.add_argument("--table", dest="table", type=str, required=True)
@@ -92,28 +106,26 @@ if __name__ == "__main__":
     parser.add_argument("--sl", dest="sl", action="store_true", default=False)
     parser.add_argument("--base-model", dest="base_model", type=str, required=True)
     parser.add_argument("--base-peft", dest="base_peft", type=str, required=False)
-    parser.add_argument("--sl-model", dest="sl_model", type=str, required=False)
     parser.add_argument("--bge-model", dest="bge_model", type=str, required=True)
     parser.add_argument("--output-result", dest="output_result", type=str, required=True)
     parser.add_argument("--save-interval", dest="save_interval", type=int, default=10)
     parser.add_argument("--preview-prompt", dest="preview_prompt", action="store_true", default=False)
     parser.add_argument("--begin", dest="begin", type=int, required=False, default=0)
     parser.add_argument("--end", dest="end", type=int, required=False, default=-1)
+    parser.add_argument("--template-file", dest="template_file", type=str, required=False, default="llm_templates/infer_input_used.j2")
     args = parser.parse_args()
 
     ####################################
     # 以下是针对不同模板、模型需要修改的部分
 
     ## 推理模板
+    # input_template_file =  "llm_templates/infer_input_used.j2"
     # input_template_file =  "llm_templates/infer_nosharp_input.j2"
     # input_template_file =  "llm_templates/infer_ddl_input.j2"
-    # input_template_file =  "llm_templates/infer_input.j2"
-    input_template_file =  "llm_templates/infer_cr_ddl_input.j2"
+    # input_template_file =  "llm_templates/infer_cr_ddl_input.j2"
     # input_template_file =  "llm_templates/infer_thinking_ddl_input.j2"
     # input_template_file =  "llm_templates/infer_cr_input.j2"
-
-    # SL 模板
-    schema_linking_input_template_file =  "llm_templates/schema_linking_input.j2"
+    input_template_file = args.template_file
 
     # 基础 LLM
     if args.model_type == "glm4":
@@ -122,14 +134,8 @@ if __name__ == "__main__":
         base_model = Llama(args.base_model, "base-model")
     elif args.model_type == "qwen":
         base_model = Qwen(args.base_model, "base-model")
-
-    # SL LLM
-    if args.sl and args.sl_model is not None:
-        # sl_model = GLM4(args.sl_model, "sl-model")
-        sl_model = GLM4(args.sl_model, "sl-model", int4=True)
-        # sl_model = Llama(args.sl_model, "sl-model")
     else:
-        sl_model = base_model
+        base_model = DumbLLM(args.base_model, "base-model")
 
     ####################################
 
@@ -143,8 +149,6 @@ if __name__ == "__main__":
         data = json.load(f)
     with open(input_template_file, "r") as f:
         input_template = Template(f.read())
-    with open(schema_linking_input_template_file, "r") as f:
-        schema_linking_input_template = Template(f.read())
 
     # 筛选出 db_name 对应的数据
     if args.db_name is not None:
@@ -158,7 +162,7 @@ if __name__ == "__main__":
 
     dbs = {}
     for db in table:
-        dbs[db["db_id"]] = build_db_from_spider(db)
+        dbs[db["db_id"]] = build_db_from_spider_bird(db)
 
     used_dbs = set()
     for sample in data:
@@ -176,17 +180,14 @@ if __name__ == "__main__":
 
     output = []
 
-    random.shuffle(data)
-
     with tqdm(data) as bar:
         for index, sample in enumerate(data):
             db = dbs[sample["db_id"]]
             question = sample["question"]
-            # 参考 SQL，标准答案
-            if args.dataset_type == "bird":
-                reference_sql = sample["SQL"] # For BIRD
-            else:
-                reference_sql = sample["query"] # For Spider
+            reference_sql = sample["query"]
+            # reference_sql = sample["sql"]
+            # link_result = sample["link_result"]
+            # link_result = [{"table": x[0], "column": x[1]} for x in sample["used_tables_and_columns"]]
 
             # 计算问题的 BGE embeddings
             with torch.no_grad():
@@ -201,33 +202,37 @@ if __name__ == "__main__":
                 reference_shot=args.reference_shot,
                 reference_datasets_dict=ref_datasets,
                 sl=args.sl,
-                sl_model=sl_model,
-                sl_template=schema_linking_input_template,
+                link_result=None,
                 input_template=input_template
             )
 
             if args.preview_prompt:
                 print(prompt)
             
+            # answer = base_model.infer(prompt, system_prompt=None, max_new_tokens=512, do_sample=False, top_p=None, top_k=None, temperature=None)
             answer = base_model.infer(prompt, system_prompt=None, max_new_tokens=512, do_sample=False, num_beams=5, top_p=None, top_k=None, temperature=None)
+            # answer = base_model.infer(prompt, system_prompt=None, max_new_tokens=512, do_sample=False, top_p=None, top_k=None, temperature=None, num_beams=8)
+            # generated_sql = re.sub(r'\s+', ' ', answer).strip()
             generated_sql = flatten_sql(extract_sql(answer))
 
-            if args.dataset_type == "bird":
-                res = {
-                    "sample_id": "bird_" + str(sample["question_id"]), # For BIRD
-                    "difficulty": sample["difficulty"], # For BIRD
-                    "db_id": sample["db_id"],
-                    "question": question,
-                    "reference": reference_sql,
-                    "generated": generated_sql
-                }
-            else:
-                res = {
-                    "db_id": sample["db_id"],
-                    "question": question,
-                    "reference": reference_sql,
-                    "generated": generated_sql
-                }
+            print(generated_sql)
+
+            # if args.dataset_type == "bird":
+            #     res = {
+            #         "sample_id": "bird_" + str(sample["question_id"]), # For BIRD
+            #         "difficulty": sample["difficulty"], # For BIRD
+            #         "db_id": sample["db_id"],
+            #         "question": question,
+            #         "reference": reference_sql,
+            #         "generated": generated_sql
+            #     }
+            # else:
+            res = {
+                "db_id": sample["db_id"],
+                "question": question,
+                "reference": reference_sql,
+                "generated": generated_sql
+            }
 
             output.append(res)
             bar.update(1)

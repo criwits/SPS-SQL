@@ -5,7 +5,7 @@ from tqdm import tqdm
 import re
 
 from llm.glm4 import GLM4
-from schema import build_db_from_spider
+from schema import build_db_from_spider_bird
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--input", dest="input", type=str, required=True)
@@ -15,6 +15,7 @@ parser.add_argument("--table", dest="table", type=str, required=True)
 parser.add_argument("--base-model", dest="base_model", type=str, required=True)
 parser.add_argument("--output-result", dest="output_result", type=str, required=True)
 parser.add_argument("--save-interval", dest="save_interval", type=int, default=10)
+parser.add_argument("--preview-prompt", dest="preview_prompt", action="store_true")
 args = parser.parse_args()
 
 input_template_file =  "llm_templates/narrate_input.j2"
@@ -36,7 +37,7 @@ with open(args.table, "r") as f:
 
 dbs = {}
 for db in table:
-    dbs[db["db_id"]] = build_db_from_spider(db)
+    dbs[db["db_id"]] = build_db_from_spider_bird(db)
 
 output = []
 
@@ -53,6 +54,9 @@ with tqdm(data) as bar:
             ddls=ddls,
             sql=sql
         )
+
+        if args.preview_prompt:
+            tqdm.write(input_text)
 
         model_output = model.infer(input_text, system_prompt=None, do_sample=False, top_k=None, top_p=None, temperature=None, max_new_tokens=512)
         answer = re.sub(r"\s+", " ", model_output).strip()

@@ -14,8 +14,13 @@ args = parser.parse_args()
 with open(args.result_file, 'r') as file:
     data = json.load(file)
 
+# gold_sqls = [f"{sample['sql']}\t{sample['db_id']}" for sample in data[args.start:args.end]]
+# predicted_sqls = [f"{sample['generated']}" for sample in data[args.start:args.end]]
+# predicted_sqls = [f"{sample['corrected']}" for sample in data[args.start:args.end]]
+
 gold_sqls = [f"{sample['reference']}\t{sample['db_id']}" for sample in data[args.start:args.end]]
 predicted_sqls = [f"{sample['generated']}" for sample in data[args.start:args.end]]
+
 
 with tempfile.TemporaryDirectory() as work_dir:
     gold_full_path = f"{work_dir}/gold.db"
@@ -27,5 +32,7 @@ with tempfile.TemporaryDirectory() as work_dir:
         file.write("\n".join(predicted_sqls))
 
     # 执行 python test-suit-sql-eval/evaluation.py --gold GOLD --pred PRED --db DB --etype exec
+    # os.system(f"python ../test-suite-sql-eval/evaluation.py --gold {gold_full_path} --pred {predicted_full_path} --db {args.db_dir} --etype exec")
     os.system(f"python test-suite-sql-eval/evaluation.py --gold {gold_full_path} --pred {predicted_full_path} --db {args.db_dir} --etype exec")
+
 

@@ -9,7 +9,14 @@ class LLM(ABC):
 
     def infer(self, input_text: str, system_prompt: str | None = None, **kwargs) -> str:
         return NotImplemented
-    
+
+class DumbLLM(LLM):
+    def __init__(self, model_path: str, name: str) -> None:
+        super().__init__("Dumb", model_path, name)
+
+    def infer(self, input_text: str, system_prompt: str | None = None, **kwargs) -> str:
+        return input_text
+
 
 llm_instance: LLM | None = None
 

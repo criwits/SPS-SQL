@@ -62,7 +62,7 @@ You can change the LLM used by modifying the LLM-calling part in `infer.py`, and
 
 ```bash
 python infer.py \
-    --dataset-type spider \
+    --model-type llama \
     --test-set [Path to Spider's dev/test set] \
     --table [Path to Spider's table json] \
     --reference-datasets-prefix [Prefix of pools] \
@@ -70,8 +70,6 @@ python infer.py \
     --base-model [LLM path] \
     --bge-model [BGE model path] \
     --output-result [Where to write result] \
-    [--sl \]
-    [--sl-model [Path to Schema Linking model]]
 ```
 
 ## Test Accuracy

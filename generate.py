@@ -2,13 +2,15 @@ from re import template
 import time
 
 from template import SQLTemplate
-from schema import Database, Table, build_db_from_spider
+from schema import Database, Table, build_db_from_spider_bird
 import argparse
 from tqdm import tqdm
 from itertools import permutations, product
 from functools import reduce
 import sqlite3
 import threading
+from memory_profiler import profile
+import tracemalloc
 
 conns = {}
 
@@ -27,6 +29,7 @@ def generate_sqls_with_timeout(db: Database, db_sqlite_file: str, template: SQLT
     finished_event.wait(timeout)
     if not finished_event.is_set():
         raise TimeoutError
+    thread.join()
 
     return result
 
@@ -55,35 +58,26 @@ def generate_sqls(db: Database, db_sqlite_file: str, template: SQLTemplate,
     result = []
     
     # 把 tables: dict 转换成 list
-    tables = list(tables.values())
+    tables = list(tables.keys())
     for table_combination in permutations(tables, tables_count):
-        # print([x.name for x in table_combination])
+        # table_combination = (Students, Courses, ...)
         # 已选定表，寻找其中符合约束的列组合
-        all_valid = True
+        all_valid = True # 是否所有表都有符合约束的列组合
         candidate_columns = []
         for table_index, table in enumerate(table_combination):
             # Step 2: 从 table 中取列
+            table = db.get_table(table)
             columns = table.columns
             columns_count = len(template.columns[table_index])
             if columns_count > len(columns):
                 all_valid = False
                 break
-            candidate_columns.append(list(permutations(columns, columns_count)))
 
-        if not all_valid:
-            continue
+            candidate_columns_for_this_table = []
 
-        # candidate_columns = [[(col1, col2), (col2, col1)], [(col1, col2, col3), ...], ...]
-        new_candidate_columns = []
-        # 现在要从 candidate_columns 中取列组合
-        for table_index, table in enumerate(table_combination):
-            # print(f"现在检查 table {table_index} 的列组合")
-            table_candidate_columns = []
-            candidates = candidate_columns[table_index]
             table_constraint = template.columns[table_index]
-            # print(f"table_constraint: {table_constraint}")
 
-            for columns in candidates:
+            for columns in permutations(columns, columns_count):
                 # print(f"检查列组合 {columns}")
                 all_valid_columns = True
 
@@ -104,33 +98,30 @@ def generate_sqls(db: Database, db_sqlite_file: str, template: SQLTemplate,
                             break
 
                 if all_valid_columns:
-                    table_candidate_columns.append(columns)
+                    candidate_columns_for_this_table.append(columns)
 
-            new_candidate_columns.append(table_candidate_columns)
+            if len(candidate_columns_for_this_table) == 0:
+                all_valid = False
+                break
 
+            candidate_columns.append(candidate_columns_for_this_table)
 
+        if not all_valid:
+            continue
 
-        total_combinations = reduce(lambda x, y: x * y, [len(x) for x in new_candidate_columns], 1)
-        for columns_combination in product(*new_candidate_columns):
+        for columns_combination in product(*candidate_columns):
             # columns_combination = [(col1, col2), (col1, col2, col3), ...]
             # print(columns_combination)
             # 现在逐表逐列检查是否符合约束
             all_valid_tables = True
             for table_index, table in enumerate(table_combination):
+                table = db.get_table(table)
                 columns = columns_combination[table_index]
                 table_constraint = template.columns[table_index]
                 all_valid_columns = True
                 for column_index, (column_name, column_type) in enumerate(columns):
                     column_constraint = table_constraint[column_index]
                     column_info = table.get_column_info(column_name)
-
-                    # if not (column_info[1] == column_constraint["column_type"] or (column_constraint["column_type"] == "number" and column_info[1] in ["integer", "real"])):
-                    #     all_valid_columns = False
-                    #     break
-
-                    # if column_info[2] != column_constraint["pk"]:
-                    #     all_valid_columns = False
-                    #     break
 
                     if column_constraint["fk"] and column_constraint["fk_info"] != (-1, -1):
                         if column_info[3] == False: # 没外键
@@ -154,7 +145,7 @@ def generate_sqls(db: Database, db_sqlite_file: str, template: SQLTemplate,
                     if " " in text:
                         return f"`{text}`"
                     return text
-                tables = [add_quote(table.name) for table in table_combination]
+                tables = [add_quote(table) for table in table_combination]
                 # columns_combinations: ((col1, col2), (col1, col2, col3), ...), col = (name, type)
                 columns = [
                     [add_quote(col[0]) for col in table_columns]
@@ -213,7 +204,7 @@ if __name__ == "__main__":
 
     dbs = []
     for item in tqdm(db_data):
-        db = build_db_from_spider(item)
+        db = build_db_from_spider_bird(item)
         dbs.append(db)
 
     used_dbs = []
@@ -233,6 +224,8 @@ if __name__ == "__main__":
 
     generated_sqls = []
 
+    # tracemalloc.start()
+
     start_time = time.time()
     total_cnt = 0
     with tqdm(total=len(used_dbs) * len(templates)) as pbar:
@@ -247,7 +240,7 @@ if __name__ == "__main__":
 
             for template in template_list:
                 try:
-                    sqls = generate_sqls_with_timeout(db,  db_path, template, 120)
+                    sqls = generate_sqls_with_timeout(db, db_path, template, 120)
                 except Exception as e:
                     sqls = []
                 if args.maximum_sqls_per_template != -1:
@@ -267,6 +260,14 @@ if __name__ == "__main__":
                             json.dump(generated_sqls, f, indent=4, ensure_ascii=False)
 
                 pbar.update(1)
+
+
+                # snapshot = tracemalloc.take_snapshot()
+                # top_stats = snapshot.statistics("lineno")
+
+                # print("[ Top 10 ]")
+                # for stat in top_stats[:10]:
+                #     print(stat)
 
     end_time = time.time()
 
